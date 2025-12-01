@@ -10,14 +10,14 @@ from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 
 # =================================================================
-# [1] 브라우저 설치 경로 설정 (기존과 동일)
+# [1] 브라우저 설치 경로 설정 (Mac 호환성)
 # =================================================================
 def get_browser_path():
     system_os = platform.system()
-    if system_os == 'Darwin':  # Mac
+    if system_os == 'Darwin':
         user_home = os.path.expanduser("~")
         base_path = os.path.join(user_home, "Library", "Application Support", "SmartStoreScraper")
-    else:  # Windows
+    else:
         if getattr(sys, 'frozen', False):
             base_path = os.path.dirname(sys.executable)
         else:
@@ -34,22 +34,13 @@ BROWSER_FOLDER = get_browser_path()
 os.environ["PLAYWRIGHT_BROWSERS_PATH"] = BROWSER_FOLDER
 
 # =================================================================
-# [2] (NEW) 결과 파일 저장 경로 설정 (다운로드 폴더로 변경)
+# [2] 결과 파일 저장 경로 설정
 # =================================================================
 def get_save_path(filename="reviews.csv"):
-    """
-    맥북의 'Read-only file system' 에러를 피하기 위해
-    결과물을 무조건 '다운로드(Downloads)' 폴더에 저장합니다.
-    """
     user_home = os.path.expanduser("~")
-    
-    # OS 상관없이 그냥 '다운로드' 폴더에 저장하는 것이 가장 안전하고 찾기 쉬움
     download_folder = os.path.join(user_home, "Downloads")
-    
-    # 다운로드 폴더가 없으면(혹시나), 바탕화면으로
     if not os.path.exists(download_folder):
         download_folder = os.path.join(user_home, "Desktop")
-        
     return os.path.join(download_folder, filename)
 
 # =================================================================
@@ -73,25 +64,39 @@ class ScraperGUI:
         self.root.geometry("600x550")
         self.root.resizable(False, False)
 
+        # 맥북 단축키(Command+C, V) 활성화
+        self.setup_copy_paste(root)
+
         style = ttk.Style()
         style.configure("TLabel", font=("Malgun Gothic", 10))
         style.configure("TButton", font=("Malgun Gothic", 10, "bold"))
 
+        # 입력 프레임
         input_frame = ttk.LabelFrame(root, text="수집 설정", padding=(10, 10))
         input_frame.pack(fill="x", padx=10, pady=10)
 
+        # URL 입력창
         ttk.Label(input_frame, text="상품 URL:").grid(row=0, column=0, sticky="w", pady=5)
         self.url_entry = ttk.Entry(input_frame, width=50)
         self.url_entry.grid(row=0, column=1, padx=5, pady=5)
+        
+        # [핵심] URL 입력창에 우클릭 메뉴 연결
+        self.bind_right_click(self.url_entry)
 
+        # 페이지 수 입력창
         ttk.Label(input_frame, text="수집 페이지 수:").grid(row=1, column=0, sticky="w", pady=5)
         self.limit_entry = ttk.Entry(input_frame, width=10)
         self.limit_entry.insert(0, "13") 
         self.limit_entry.grid(row=1, column=1, sticky="w", padx=5, pady=5)
+        
+        # [핵심] 페이지 수 입력창에도 우클릭 메뉴 연결
+        self.bind_right_click(self.limit_entry)
 
+        # 시작 버튼
         self.start_btn = ttk.Button(input_frame, text="수집 시작", command=self.start_thread)
         self.start_btn.grid(row=2, column=0, columnspan=2, pady=10, sticky="ew")
 
+        # 로그 프레임
         log_frame = ttk.LabelFrame(root, text="진행 상황", padding=(10, 10))
         log_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
@@ -99,13 +104,57 @@ class ScraperGUI:
         self.log_text.pack(fill="both", expand=True)
 
         self.log("프로그램이 준비되었습니다.")
-        
-        # 저장 경로 미리 안내
+        self.log("💡 Tip: 붙여넣기가 안 되면 '우클릭'을 해보세요!")
         save_path = get_save_path()
-        self.log(f"💾 결과 저장 위치: {save_path}")
-        self.log("👉 URL을 입력하고 [수집 시작]을 누르세요.")
+        self.log(f"💾 저장 위치: {save_path}")
 
+    # -----------------------------------------------------------
+    # [기능 1] 맥북용 Command+C, V 단축키 강제 활성화
+    # -----------------------------------------------------------
+    def setup_copy_paste(self, root):
+        if platform.system() == 'Darwin':  # Mac OS인 경우
+            try:
+                # Command+C (복사)
+                root.bind_class("Entry", "<Command-c>", lambda e: e.widget.event_generate("<<Copy>>"))
+                root.bind_class("Text", "<Command-c>", lambda e: e.widget.event_generate("<<Copy>>"))
+                
+                # Command+V (붙여넣기)
+                root.bind_class("Entry", "<Command-v>", lambda e: e.widget.event_generate("<<Paste>>"))
+                root.bind_class("Text", "<Command-v>", lambda e: e.widget.event_generate("<<Paste>>"))
+                
+                # Command+A (전체 선택)
+                root.bind_class("Entry", "<Command-a>", lambda e: e.widget.event_generate("<<SelectAll>>"))
+                root.bind_class("Text", "<Command-a>", lambda e: e.widget.event_generate("<<SelectAll>>"))
+            except Exception:
+                pass
+
+    # -----------------------------------------------------------
+    # [기능 2] 마우스 우클릭 메뉴 (붙여넣기) 추가
+    # -----------------------------------------------------------
+    def bind_right_click(self, widget):
+        # 우클릭 메뉴 생성
+        menu = tk.Menu(widget, tearoff=0)
+        menu.add_command(label="잘라내기 (Cut)", command=lambda: widget.event_generate("<<Cut>>"))
+        menu.add_command(label="복사 (Copy)", command=lambda: widget.event_generate("<<Copy>>"))
+        menu.add_command(label="붙여넣기 (Paste)", command=lambda: widget.event_generate("<<Paste>>"))
+        
+        def show_menu(event):
+            menu.post(event.x_root, event.y_root)
+
+        # Mac은 Button-2 또는 Button-3, 윈도우는 Button-3
+        if platform.system() == "Darwin":
+            widget.bind("<Button-2>", show_menu)
+            widget.bind("<Button-3>", show_menu)
+        else:
+            widget.bind("<Button-3>", show_menu)
+
+    # -----------------------------------------------------------
+    # 로그 및 스레드 처리 (이전과 동일)
+    # -----------------------------------------------------------
     def log(self, message):
+        self.root.after(0, self._update_log, message)
+
+    def _update_log(self, message):
         self.log_text.configure(state='normal')
         self.log_text.insert(tk.END, message + "\n")
         self.log_text.see(tk.END)
@@ -133,15 +182,13 @@ class ScraperGUI:
         try:
             self.install_browser_if_needed()
             extract_reviews_to_csv(self, url, limit_pages)
-            
-            # 완료 메시지에 저장 경로 포함
             save_path = get_save_path()
-            messagebox.showinfo("완료", f"수집이 완료되었습니다!\n파일 위치: {save_path}")
+            self.root.after(0, lambda: messagebox.showinfo("완료", f"수집 완료!\n파일 위치: {save_path}"))
         except Exception as e:
             self.log(f"❌ 에러 발생: {e}")
-            messagebox.showerror("에러", f"오류가 발생했습니다.\n{e}")
+            self.root.after(0, lambda: messagebox.showerror("에러", f"오류가 발생했습니다.\n{e}"))
         finally:
-            self.start_btn.config(state="normal")
+            self.root.after(0, lambda: self.start_btn.config(state="normal"))
 
     def install_browser_if_needed(self):
         self.log("⚙️ 브라우저 엔진 상태 확인 중...")
@@ -167,10 +214,9 @@ class ScraperGUI:
                 raise e
 
 # =================================================================
-# [5] 스크래핑 로직
+# [5] 웹 스크래핑 로직 (이전과 동일)
 # =================================================================
 def parse_review_card(card):
-    # (이전 코드와 동일 - 생략)
     nickname_el = card.select_one(".Db9Dtnf7gY strong")
     nickname = nickname_el.get_text(strip=True) if nickname_el else ""
     date_el = card.select_one(".Db9Dtnf7gY span:nth-of-type(1)")
@@ -232,7 +278,7 @@ def load_review_frame(gui, page):
         page.mouse.wheel(0, 600)
         time.sleep(0.2)
     else:
-        gui.log("❌ 리뷰탭 못 찾음.")
+        gui.log("❌ 리뷰탭 못 찾음")
         return page
 
     gui.log("⌛ 리뷰 iframe 로딩 대기…")
@@ -264,12 +310,10 @@ def extract_reviews_to_csv(gui, url, limit_pages=13):
         browser = p.chromium.launch(headless=False)
         page = browser.new_page()
         gui.log(f"⏳ 페이지 접속 중: {url}")
-        
         try:
             page.goto(url, timeout=60000)
         except Exception:
             gui.log("⚠️ 접속 지연 (계속 진행)")
-
         time.sleep(3)
         target_frame = load_review_frame(gui, page)
         
@@ -282,7 +326,6 @@ def extract_reviews_to_csv(gui, url, limit_pages=13):
             gui.log(f"📌 페이지 {n} 수집 중…")
             gui.log("   (스크롤 내리는 중...)")
             smooth_scroll(target_frame, steps=10, delay=0.2)
-
             soup = BeautifulSoup(target_frame.content(), "lxml")
             review_cards = soup.select(".IwcuBUIAKf")
             
@@ -290,30 +333,23 @@ def extract_reviews_to_csv(gui, url, limit_pages=13):
             for card in review_cards:
                 info = parse_review_card(card)
                 if not info: continue
-                
                 key = f"{info['nickname']}|{info['date']}|{info['content'][:10]}"
                 if key not in seen:
                     seen.add(key)
                     reviews.append(info)
                     current_page_reviews += 1
-
             gui.log(f"   └ 신규: {current_page_reviews}건 (누적: {len(reviews)}건)")
-            
             if not load_next_page(gui, target_frame, n):
                 gui.log("⛔ 다음 페이지 없음")
                 break
-
         browser.close()
 
-    # [핵심 변경] 저장 경로를 다운로드 폴더로 지정
     save_path = get_save_path("reviews.csv")
-    
     df = pd.DataFrame(reviews)
     df.to_csv(save_path, index=False, encoding="utf-8-sig")
-    
     gui.log("====================================")
     gui.log(f"✅ 총 {len(reviews)}건 수집 완료")
-    gui.log(f"📁 파일 저장 완료: {save_path}") # 로그에도 경로 표시
+    gui.log(f"📁 파일 저장 완료: {save_path}")
 
 if __name__ == "__main__":
     root = tk.Tk()
