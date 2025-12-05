@@ -60,7 +60,7 @@ def smooth_scroll(target_frame, steps=10, delay=0.2):
 class ScraperGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("네이버 스마트스토어 리뷰 수집기")
+        self.root.title("네이버 스마트스토어 리뷰 수집기 (Anti-Bot Applied)")
         self.root.geometry("600x550")
         self.root.resizable(False, False)
 
@@ -214,7 +214,7 @@ class ScraperGUI:
                 raise e
 
 # =================================================================
-# [5] 웹 스크래핑 로직 (이전과 동일)
+# [5] 웹 스크래핑 로직 (Anti-Bot 기능 추가됨)
 # =================================================================
 def parse_review_card(card):
     nickname_el = card.select_one(".Db9Dtnf7gY strong")
@@ -302,18 +302,48 @@ def load_next_page(gui, target_frame, current_page_num):
     else:
         return False
 
+# + [수정됨] Anti-Bot 설정이 적용된 함수
 def extract_reviews_to_csv(gui, url, limit_pages=13):
     reviews = []
     seen = set()
 
+    # + 실제 사람처럼 보이기 위한 User-Agent 설정
+    USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
-        page = browser.new_page()
+        
+        # + [핵심 수정] 새로운 컨텍스트에 User-Agent와 화면 크기, 로케일 설정
+        context = browser.new_context(
+            user_agent=USER_AGENT,
+            viewport={"width": 1920, "height": 1080},
+            locale="ko-KR"
+        )
+        
+        page = context.new_page()
+
+        # + [핵심 수정] navigator.webdriver 속성을 숨겨서 봇 탐지 우회
+        page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            })
+        """)
+
         gui.log(f"⏳ 페이지 접속 중: {url}")
         try:
-            page.goto(url, timeout=60000)
+            # 타임아웃 60초, DOM 로드 완료 시점까지 대기
+            page.goto(url, timeout=60000, wait_until="domcontentloaded")
         except Exception:
             gui.log("⚠️ 접속 지연 (계속 진행)")
+        
+        # + 혹시 차단 페이지로 갔는지 확인하는 로직 추가
+        time.sleep(2)
+        if "상품이 존재하지 않습니다" in page.title() or page.locator("text=상품이 존재하지 않습니다").count() > 0:
+             gui.log("❌ 차단됨: 네이버가 봇 접근을 막았습니다.")
+             gui.log("👉 해결책: 잠시 후 다시 시도하거나, 크롬 익스텐션 방식을 사용하세요.")
+             browser.close()
+             return
+
         time.sleep(3)
         target_frame = load_review_frame(gui, page)
         
